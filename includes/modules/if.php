@@ -1,9 +1,9 @@
 <?php
-
-
-/*========================================================================
+/*---------------------------------------------
  *
  * [if] - Display content based on conditions
+ *
+ * @todo Add filters
  *
  */
 
@@ -50,19 +50,33 @@ class CCS_If {
 
 			'field' => '',
 			'user_field' => '',
-			'value' => '',
+      'value' => '',
+      'lowercase' => '',
+
+      'empty' => 'true',
 
 			'not' => '',
 			'start' => '',
+
+      // field="date" comparison
+      'before' => '',
+      'after' => '',
+
+      'pass' => '',
+      'pass_empty' => 'true',
 		);
 
 		extract( shortcode_atts( $args , $atts, true ) );
 
-		if (is_array($atts)) $atts = array_flip($atts); /* Check parameters with no value */
-/*
-//		if ( (empty($flag))&&(empty($no_flag)) || (isset($atts['empty']))) return;
-		if ((isset($atts['empty'])) || (isset($atts['last'])) ) return; // [if empty] [if last] is processed by [loop]
-*/
+    $atts = CCS_Content::get_all_atts( $atts );
+
+    if ( ( !empty($before) || !empty($after) ) && empty($field) ) {
+      $field = 'date'; // Default for before/after parameter
+    }
+    if ( isset($atts['today']) ) {
+      $field = 'date';
+      $value = 'today';
+    }
 		if (!empty($no_flag)) $flag = $no_flag;
 
 		$out = '';
@@ -74,7 +88,7 @@ class CCS_If {
 		$content = $if_else['if'];
 		$else = $if_else['else'];
 
-		/*========================================================================
+		/*---------------------------------------------
 		 *
 		 * If we're inside loop shortcode
 		 *
@@ -84,7 +98,7 @@ class CCS_If {
 
 			if (!empty($every)) {
 
-				/*========================================================================
+				/*---------------------------------------------
 				 *
 				 * Every X number of posts in [loop]
 				 *
@@ -107,7 +121,7 @@ class CCS_If {
 
 		} // End [loop] only conditions
 
-		/*========================================================================
+		/*---------------------------------------------
 		 *
 		 * Get global post info
 		 *
@@ -122,10 +136,11 @@ class CCS_If {
 		$current_post_id = isset($post->ID) ? $post->ID : null;
 
 
+    // [if flag] - To be deprecated
 		// @todo Combine with [if field] without value
 		if ( !empty($flag) ) {
 
-			/*========================================================================
+			/*---------------------------------------------
 			 *
 			 * Check field as condition [if flag="field"]
 			 *
@@ -150,7 +165,7 @@ class CCS_If {
 		}
 
 
-		/*========================================================================
+		/*---------------------------------------------
 		 *
 		 * Taxonomy: category, tags, ..
 		 *
@@ -168,7 +183,7 @@ class CCS_If {
 
 		// Check if current post has taxonomy term
 
-		if ( !empty($taxonomy) && !empty($term) ) {
+		if ( !empty($taxonomy) ) {
 
 			if ($taxonomy == 'tag') $taxonomy = 'post_tag';
 
@@ -205,11 +220,10 @@ class CCS_If {
 
 		/*---------------------------------------------
 		 *
-		 * Check if current term in the for loop has children
+		 * Check if current term in [for] loop has children
 		 *
 		 */
 		
-
 		if ( isset($atts['children']) && CCS_ForEach::$state['is_for_loop'] ) {
 			$current_term = CCS_ForEach::$current_term[ CCS_ForEach::$index ];
 			$current_taxonomy = $current_term['taxonomy'];
@@ -223,7 +237,7 @@ class CCS_If {
 
 
 
-		/*========================================================================
+		/*---------------------------------------------
 		 *
 		 * Field: field="field_slug" value="this,that"
 		 *
@@ -231,30 +245,81 @@ class CCS_If {
 
 		if ( !empty($field) || !empty($user_field) ) {
 
+      // Post field
 			if ( empty($user_field) ) {
 
-				// Post field
-				$check = CCS_Content::get_prepared_field( $field );
+        /*---------------------------------------------
+         *
+         * Published date
+         *
+         */
+        
+        if ( $field == 'date' ) {
 
+          // Get timestamps for publish date and today
+          $check = strtotime( $post->post_date );
+          $today = strtotime('now'); // Lazy way
+
+          if (!empty($before)) {
+
+            $value = strtotime($before);
+            $compare = 'OLD';
+
+          } elseif (!empty($after)) {
+
+            $value = strtotime($after);
+            $compare = 'NEW';
+
+          } else {
+
+            if ( $value == 'today' ) {
+              $value = $today;
+            } elseif ( substr($value,0,6)=='today ' ) {
+
+              // Get difference, i.e., "+10 days"
+              $diff = substr($value,6);
+
+              // Add or subtract days
+              $value = strtotime( $diff, $today );
+            } else {
+              $value = strtotime( $value ); // Try to convert other values to timestamp
+            }
+          }
+
+          // Convert to format 20150311 so we can compare as number
+          $check = date('Ymd',$check);
+          $value = date('Ymd',$value);
+
+          // echo 'Check field: '.$field.' '.$check.' = '.$value.'<br>';
+
+        } else {
+          // Normal field
+          $check = CCS_Content::get_prepared_field( $field );
+        }
+
+      // User field
 			} else {
 
-				// User field
 				$field = $user_field;
-				$check = CCS_User::get_user_field( $field );
+				$check = strtolower(CCS_User::get_user_field( $field ));
+        $value = strtolower($value); // lowercase for user role
 			}
 
 			// start=".."
-
 			if ( !empty($start) && ($start!='true') && empty($value) ) {
 				$value = $start;
 				$start = 'true';
 			}
 
-			if (empty($check) || ($check==false))
-				$condition = false;
-			else {
+			if ( empty($check) || ( $check == false ) ) {
 
-				if (!is_array($check)) $check = array($check);
+        // @todo What if field value is boolean, i.e., checkbox?
+
+				$condition = false;
+
+      }	else {
+
+				if ( !is_array($check) ) $check = array($check);
 
 				if ( !empty($value) ) {
 
@@ -264,30 +329,65 @@ class CCS_If {
 
 						foreach ($check as $check_this) {
 
-							if ($start=='true') {
+							if ( $start == 'true' ) {
+
 								// Only check beginning of field value
 								$check_this = substr($check_this, 0, strlen($this_value));
 							}
 
-							if ($compare == 'OR') {
-								$condition = ($this_value==$check_this) ? true : $condition;
-							} else { // AND
-								$condition = ($this_value==$check_this) ? true : false;
-								if (!$condition) break; // Every term must be found
-							}
-						}
-					}
+              if ($lowercase == 'true') $check_this = strtolower($check_this);
+
+							if ($compare == 'AND') {
+
+                $condition = ($this_value==$check_this) ? true : false;
+                if (!$condition) break; // Every term must be found
+
+							} else {
+
+                switch ($compare) {
+                  case 'MORE':
+                  case 'NEW':
+                  case 'NEWER':
+                  case '>':
+                    $condition = ($check_this > $this_value) ? true : $condition;
+                  break;
+                  case '>=':
+                    $condition = ($check_this >= $this_value) ? true : $condition;
+                  break;
+                  case 'LESS':
+                  case 'OLD':
+                  case 'OLDER':
+                  case '<':
+                    $condition = ($check_this < $this_value) ? true : $condition;
+                  break;
+                  case '<=':
+                    $condition = ($check_this <= $this_value) ? true : $condition;
+                  break;
+                  case 'EQUAL':
+                  case '=':
+                  default:
+                    $condition = ($check_this == $this_value) ? true : $condition;
+                  break;
+                }
+
+							} // End compare
+						} // End for each check
+					} // End for each value
 
 				} else {
-
 					// No value specified - just check that there is field value
-					$condition = !empty($check) ? true : false;
+          if ($empty=='true') {
+            $condition = !empty($check) ? true : false;
+          } else {
+            $condition = false;
+          }
 				}
-			}
-		}
+			} // End if check not empty
+
+		} // End field value condition
 
 
-		/*========================================================================
+		/*---------------------------------------------
 		 *
 		 * Post type, name
 		 *
@@ -313,7 +413,7 @@ class CCS_If {
 		}
 
 
-		/*========================================================================
+		/*---------------------------------------------
 		 *
 		 * Post parent
 		 *
@@ -364,7 +464,7 @@ class CCS_If {
 		}
 
 
-		/*========================================================================
+		/*---------------------------------------------
 		 *
 		 * Attachments
 		 *
@@ -424,7 +524,7 @@ class CCS_If {
 			$condition =  CCS_Gallery_Field::has_gallery();
 		}		
 
-		/*========================================================================
+		/*---------------------------------------------
 		 *
 		 * Template: home, archive, single..
 		 * [if comment] - current post has comment
@@ -439,15 +539,48 @@ class CCS_If {
 		$condition = isset($atts['single']) ? is_single() : $condition;
 		$condition = isset($atts['search']) ? is_search() : $condition;
 		$condition = isset($atts['404']) ? is_404() : $condition;
-		$condition = isset($atts['none']) ? !have_posts() : $condition;
+    $condition = isset($atts['none']) ? !have_posts() : $condition;
 
 		if (isset($atts['tax_archive'])) {
 			if ($tax_archive == 'true') $tax_archive = '';
 			$condition = is_tax( $tax_archive );
 		}
 
+    /*---------------------------------------------
+     *
+     * First and last post in loop
+     *
+     */
+    
+    if (CCS_Loop::$state['is_loop']) {
 
-		/*========================================================================
+      $condition = isset($atts['first']) ?
+        CCS_Loop::$state['loop_count'] == 1 : $condition;
+
+      $condition = isset($atts['last']) ?
+        CCS_Loop::$state['loop_count'] == CCS_Loop::$state['post_count'] : $condition;
+
+    }
+
+    /*---------------------------------------------
+     *
+     * Passed value
+     *
+     */
+    
+    if ( !empty($pass) || ($pass_empty!='true') ) {
+
+      if ( ($pass_empty!='true') && empty($pass) ) {
+          $condition = false;
+      } elseif ( !empty($value) ) {
+        $condition = ($pass == $value);
+      } else {
+        $condition = true;
+      }
+    }
+
+
+		/*---------------------------------------------
 		 *
 		 * Not
 		 *
